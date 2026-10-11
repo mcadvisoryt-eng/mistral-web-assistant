@@ -41,7 +41,7 @@ jobs:
       # Gemini's OpenAI-compatible endpoint (no trailing slash!).
       GEMINI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai"
       # ngrok free static dev domain - stable across runs.
-      PUBLIC_URL: "https://gade.ngrok-free.dev"
+      PUBLIC_URL: "https://detest-humongous-brigade.ngrok-free.dev"
       DEFAULT_MODEL: "${{ github.event.inputs.model || 'gemini-2.5-flash' }}"
 
     steps:
