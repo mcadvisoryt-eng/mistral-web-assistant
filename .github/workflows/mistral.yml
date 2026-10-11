@@ -29,7 +29,9 @@ jobs:
       # ntfy topic - keep it secret/unguessable, it doubles as the password.
       NTFY_TOPIC: "mcadvisoryt-mistral-9f2c7a"
       ADMIN_EMAIL: "joshi@joshi.com"
-      ADMIN_PASSWORD: "joshi"
+      # Override by adding a repo secret named ADMIN_PASSWORD (recommended, since
+      # this repo is public and the default is a weak, known password).
+      ADMIN_PASSWORD: "${{ secrets.ADMIN_PASSWORD || 'joshi' }}"
       ADMIN_NAME: "Joshi"
       # Gemini's OpenAI-compatible endpoint (no trailing slash!).
       GEMINI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -65,7 +67,7 @@ jobs:
             head -c 400 /tmp/models.json || true
             exit 1
           fi
-          python3 -c "import json;print('available Gemini models:', len(json.load(open('/tmp/models.json')).get('data', [])))"
+          python3 -c "import json;m=json.load(open('/tmp/models.json')).get('data',[]);print('available Gemini models:',len(m));print(', '.join(x.get('id','?') for x in m[:25]))"
 
       - name: Free up disk space
         run: |

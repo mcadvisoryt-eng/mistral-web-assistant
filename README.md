@@ -64,6 +64,8 @@ Everything is set as environment variables in `.github/workflows/mistral.yml`:
 - `DEFAULT_MODEL` — the Gemini model pre-selected in the UI. Also settable per-run via the
   **Run workflow** input.
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` — the admin account created on startup.
+  The password defaults to `joshi`, but you can override it by adding a repo secret named
+  `ADMIN_PASSWORD` (recommended, since this repo is public).
 - `NTFY_TOPIC` — the ntfy channel for notifications.
 - `WEB_SEARCH_ENGINE` — `tavily` by default; other engines are supported by Open WebUI.
 
