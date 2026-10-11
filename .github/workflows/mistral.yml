@@ -1,0 +1,118 @@
+name: mistral-web-assistant
+
+on:
+  schedule:
+    # every 5 hours, on the hour (UTC). GitHub may delay scheduled runs under load.
+    - cron: "0 */5 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: mistral-web-assistant
+  cancel-in-progress: true
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    # GitHub-hosted jobs are hard-capped at 6h; stop just short of it.
+    timeout-minutes: 350
+    env:
+      MODEL_REPO: bartowski/dolphin-2.9.3-mistral-7B-32k-GGUF
+      MODEL_FILE: dolphin-2.9.3-mistral-7B-32k-Q4_K_M.gguf
+      SEARCH_PROVIDER: tavily
+      LLAMA_URL: http://127.0.0.1:8080
+      APP_PORT: "8000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h /
+
+      - name: Install llama.cpp (prebuilt CPU build)
+        run: |
+          set -euo pipefail
+          mkdir -p llm
+          URL=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+                | grep -oE 'https://[^"]+bin-ubuntu-x64\.zip' | head -1)
+          echo "Downloading: $URL"
+          curl -L "$URL" -o llm/llama.zip
+          unzip -q -o llm/llama.zip -d llm
+          BIN=$(find llm -type f -name llama-server | head -1)
+          echo "LLAMA_SERVER=$BIN" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$(dirname "$BIN")" >> "$GITHUB_ENV"
+          chmod +x "$BIN"
+
+      - name: Download uncensored Mistral 7B (Q4_K_M, ~4.4 GB)
+        run: |
+          pip install --quiet "huggingface_hub[cli]"
+          python - <<'PY'
+          import os
+          from huggingface_hub import hf_hub_download
+          hf_hub_download(
+              repo_id=os.environ["MODEL_REPO"],
+              filename=os.environ["MODEL_FILE"],
+              local_dir="models",
+          )
+          PY
+          ls -lh models
+
+      - name: Install Python deps
+        run: pip install --quiet fastapi "uvicorn[standard]" httpx
+
+      - name: Install cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o cloudflared
+          chmod +x cloudflared
+          ./cloudflared --version
+
+      - name: Start llama-server (CPU, 4 threads)
+        run: |
+          nohup "$LLAMA_SERVER" -m "models/$MODEL_FILE" \
+            --host 127.0.0.1 --port 8080 \
+            -c 8192 -t 4 --threads-batch 4 \
+            > llama.log 2>&1 &
+          echo "llama-server started"
+
+      - name: Start web-search wrapper
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+        run: |
+          nohup python serve.py > app.log 2>&1 &
+          echo "wrapper started"
+
+      - name: Wait for the model to load
+        run: |
+          for i in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null; then
+              echo "model ready"; break
+            fi
+            sleep 5
+          done
+          echo "---- llama.log ----"; tail -n 8 llama.log || true
+
+      - name: Open tunnel and publish the URL
+        run: |
+          ./cloudflared tunnel --url "http://127.0.0.1:${APP_PORT}" --no-autoupdate > tunnel.log 2>&1 &
+          URL=""
+          for i in $(seq 1 60); do
+            URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' tunnel.log | head -1 || true)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
+          {
+            echo "## Mistral web assistant is live"
+            echo ""
+            echo "**${URL}**"
+            echo ""
+            echo "Open that URL and chat. It stays up until this job's ~6-hour timeout."
+            echo "The URL changes every run - grab the newest one from the latest run's Summary."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "URL=${URL}"
+          # keep the tunnel (and the job) alive for the rest of the window
+          sleep 21000
