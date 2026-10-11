@@ -4,11 +4,20 @@ on:
   schedule:
     # every 5 hours, on the hour (UTC). GitHub may delay scheduled runs under load.
     - cron: "0 */5 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Gemini model id to pre-select in Open WebUI"
+        required: false
+        default: "gemini-2.5-flash"
 
 concurrency:
   group: mistral-web-assistant
   cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   serve:
@@ -24,9 +33,39 @@ jobs:
       ADMIN_NAME: "Joshi"
       # Gemini's OpenAI-compatible endpoint (no trailing slash!).
       GEMINI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai"
+      # ngrok free static dev domain - stable across runs.
+      PUBLIC_URL: "https://gade.ngrok-free.dev"
+      DEFAULT_MODEL: "${{ github.event.inputs.model || 'gemini-2.5-flash' }}"
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        run: |
+          missing=""
+          [ -z "${{ secrets.GEMINI_API_KEY }}" ] && missing="$missing GEMINI_API_KEY"
+          [ -z "${{ secrets.NGROK_AUTHTOKEN }}" ] && missing="$missing NGROK_AUTHTOKEN"
+          [ -z "${{ secrets.TAVILY_API_KEY }}" ] && missing="$missing TAVILY_API_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing"
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "all required secrets present"
+
+      - name: Verify Gemini API key
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          code=$(curl -s -o /tmp/models.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${GEMINI_API_KEY}" "${GEMINI_BASE_URL}/models" || true)
+          echo "Gemini /models HTTP ${code}"
+          if [ "$code" != "200" ]; then
+            echo "::error::Gemini key check failed (HTTP ${code})"
+            head -c 400 /tmp/models.json || true
+            exit 1
+          fi
+          python3 -c "import json;print('available Gemini models:', len(json.load(open('/tmp/models.json')).get('data', [])))"
 
       - name: Free up disk space
         run: |
@@ -60,10 +99,21 @@ jobs:
             -e WEBUI_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
             -e WEBUI_ADMIN_NAME="${ADMIN_NAME}" \
             -e WEBUI_SECRET_KEY=ephemeral-runner-secret \
+            -e WEBUI_URL="${PUBLIC_URL}" \
+            -e DEFAULT_MODELS="${DEFAULT_MODEL}" \
+            -e DEFAULT_PINNED_MODELS="${DEFAULT_MODEL}" \
+            -e DEFAULT_MODEL_METADATA='{"capabilities":{"web_search":true}}' \
             -e ENABLE_WEB_SEARCH=true \
             -e WEB_SEARCH_ENGINE=tavily \
+            -e WEB_SEARCH_RESULT_COUNT=5 \
+            -e WEB_SEARCH_CONCURRENT_REQUESTS=3 \
             -e TAVILY_API_KEY="${TAVILY_API_KEY}" \
             -e BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL=true \
+            -e USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" \
+            -e ANONYMIZED_TELEMETRY=false \
+            -e SCARF_NO_ANALYTICS=true \
+            -e DO_NOT_TRACK=true \
+            -e ENABLE_VERSION_UPDATE_CHECK=false \
             -e ENABLE_PERSISTENT_CONFIG=false \
             ghcr.io/open-webui/open-webui:main
           echo "open-webui container started"
@@ -79,7 +129,7 @@ jobs:
           docker ps --format '{{.Names}} | {{.Status}}'
           echo "---- open-webui logs ----"; docker logs --tail 20 open-webui || true
 
-      - name: Start ngrok tunnel and publish the URL
+      - name: Start ngrok tunnel
         env:
           NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: |
@@ -94,7 +144,7 @@ jobs:
             [ -n "$URL" ] && break
             sleep 2
           done
-          echo "URL=${URL}" >> "$GITHUB_ENV"
+          printf '%s' "$URL" > url.txt
           {
             echo "## Open WebUI is live"
             echo ""
@@ -105,8 +155,26 @@ jobs:
           echo "URL=${URL}"
           if [ -z "$URL" ]; then echo "--- ngrok.log ---"; tail -n 30 ngrok.log || true; fi
 
-      - name: Notify via ntfy
+      - name: Publish endpoint to a tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          if [ ! -s url.txt ]; then echo "no URL to publish"; exit 0; fi
+          URL=$(cat url.txt)
+          BODY=$(printf 'Open WebUI is live at %s\n\nLogin: `%s` / `%s`\n\n_Updated %s (run %s)._' \
+            "$URL" "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$(date -u +%FT%TZ)" "${GITHUB_RUN_ID}")
+          NUM=$(gh issue list --state open --limit 100 --json number,title \
+                --jq '.[] | select(.title=="Current endpoint") | .number' | head -1)
+          if [ -n "$NUM" ]; then
+            gh issue edit "$NUM" --body "$BODY"
+          else
+            gh issue create --title "Current endpoint" --body "$BODY"
+          fi
+          echo "endpoint issue updated"
+
+      - name: Notify start via ntfy
+        run: |
+          URL=$(cat url.txt 2>/dev/null || true)
           MSG=$(printf 'Open WebUI is up.\nURL: %s\nLogin: %s / %s' "$URL" "$ADMIN_EMAIL" "$ADMIN_PASSWORD")
           curl -s \
             -H "Title: Mistral web assistant started" \
@@ -114,7 +182,29 @@ jobs:
             -H "Tags: robot" \
             -H "Click: ${URL}" \
             -d "$MSG" "https://ntfy.sh/${NTFY_TOPIC}" || true
-          echo "notification sent"
+          echo "start notification sent"
 
-      - name: Keep the tunnel alive
-        run: sleep 21000
+      - name: Keep the tunnel alive (health watchdog)
+        run: |
+          END=$(( $(date +%s) + 20000 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            sleep 300
+            if curl -sf "http://127.0.0.1:${APP_PORT}/health" >/dev/null; then
+              echo "$(date -u +%T) healthy"
+            else
+              echo "$(date -u +%T) unhealthy - restarting open-webui"
+              docker restart open-webui || true
+              sleep 20
+            fi
+          done
+
+      - name: Notify failure via ntfy
+        if: failure()
+        run: |
+          curl -s \
+            -H "Title: Mistral web assistant FAILED" \
+            -H "Priority: high" \
+            -H "Tags: warning" \
+            -d "Run ${GITHUB_RUN_ID} failed. ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            "https://ntfy.sh/${NTFY_TOPIC}" || true
+          echo "failure notification sent"

@@ -2,7 +2,7 @@
 
 A scheduled GitHub Actions job that runs the **Open WebUI** chat interface on top of
 **Google Gemini** (via its OpenAI-compatible endpoint), with **live web search**, exposed
-through an **ngrok** tunnel and announced over **ntfy**.
+through an **ngrok** tunnel, announced over **ntfy**, and tracked in a GitHub issue.
 
 - Runs automatically **every 5 hours** (`cron: 0 */5 * * *`, UTC), and can be started
   manually from the Actions tab with **Run workflow**.
@@ -11,7 +11,16 @@ through an **ngrok** tunnel and announced over **ntfy**.
 - **Gemini** is the model backend (free tier). No local model, no download, no CPU
   inference — the model list comes straight from Google.
 - **ngrok** exposes it on your account's free static dev domain, so the URL is stable.
-- **ntfy** sends a start notification with the URL and the login.
+- **ntfy** sends a start notification (URL + login) and a failure alert if a run breaks.
+- A **"Current endpoint"** issue is kept up to date with the live URL.
+
+## Where to find the URL
+
+Three places, any of which works:
+
+1. The **"Current endpoint"** issue in this repo (auto-updated each run).
+2. The run's **Summary** page.
+3. The **ntfy** notification on your phone.
 
 ## Read this first
 
@@ -25,24 +34,38 @@ A GitHub Actions job is **ephemeral**. It is not a permanent server:
 The tunnel is **public**, and the admin login is a **weak, known password**. Anyone who
 learns the URL can log in as admin. The ntfy topic is also public on ntfy.sh — anyone who
 knows the topic name can read the notification (which contains the password). Keep the
-topic name secret, and treat this as a personal demo.
+topic name secret, and treat this as a personal demo, not anything holding real data.
 
 ## Setup (one time)
 
 Add these repository secrets (**Settings -> Secrets and variables -> Actions**):
 
-1. `GEMINI_API_KEY` — from https://aistudio.google.com/apikey (free, no card needed).
-2. `TAVILY_API_KEY` — your search key. (Set `SEARCH_PROVIDER`/`WEB_SEARCH_ENGINE` to
-   match if you use a different engine.)
-3. `NGROK_AUTHTOKEN` — from https://dashboard.ngrok.com/get-started/your-authtoken.
+| Secret | Where to get it |
+| --- | --- |
+| `GEMINI_API_KEY` | https://aistudio.google.com/apikey (free, no card) |
+| `TAVILY_API_KEY` | https://tavily.com (search key) |
+| `NGROK_AUTHTOKEN` | https://dashboard.ngrok.com/get-started/your-authtoken |
 
-Subscribe to your ntfy topic in the ntfy app or at https://ntfy.sh/<NTFY_TOPIC>.
+Subscribe to your ntfy topic in the ntfy app, or at https://ntfy.sh/<NTFY_TOPIC>.
+
+If ngrok fails with `ERR_NGROK_15013`, claim your free dev domain at
+https://dashboard.ngrok.com/domains and update `PUBLIC_URL` in the workflow.
 
 ## Using it
 
-Open the URL from the latest run's Summary (or the ntfy notification) and log in with the
-admin account shown there. Pick a Gemini model (e.g. a Flash model) and toggle web search
-in a chat.
+Open the URL and log in with the admin account from the endpoint issue. The model is
+pre-selected (a Gemini Flash model) and web search is enabled, so you can start chatting
+immediately.
+
+## Configuration
+
+Everything is set as environment variables in `.github/workflows/mistral.yml`:
+
+- `DEFAULT_MODEL` — the Gemini model pre-selected in the UI. Also settable per-run via the
+  **Run workflow** input.
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` — the admin account created on startup.
+- `NTFY_TOPIC` — the ntfy channel for notifications.
+- `WEB_SEARCH_ENGINE` — `tavily` by default; other engines are supported by Open WebUI.
 
 ## Notes and limits
 
@@ -55,3 +78,11 @@ in a chat.
   set the model's Function Calling to **Legacy** in Advanced Params.
 - Scheduled workflows run from the **default branch** and are auto-disabled after
   **60 days of repository inactivity**; push any commit to re-enable.
+
+## Troubleshooting
+
+- **"No models available" in the UI** — the `GEMINI_API_KEY` is missing/invalid. The
+  workflow's *Verify Gemini API key* step fails loudly on this; check the run log.
+- **No ntfy notification** — confirm the topic name matches, and that the runner could
+  reach ntfy.sh (the step logs a line either way).
+- **Blank replies** — set Function Calling to Legacy for the model (Gemini quirk above).
