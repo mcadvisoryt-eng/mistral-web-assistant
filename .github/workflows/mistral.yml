@@ -19,9 +19,12 @@ jobs:
       MODEL_REPO: bartowski/dolphin-2.9.3-mistral-7B-32k-GGUF
       MODEL_FILE: dolphin-2.9.3-mistral-7B-32k-Q4_K_M.gguf
       SEARCH_PROVIDER: tavily
-      LLAMA_URL: http://127.0.0.1:8080
       APP_PORT: "8000"
-      MAX_TOKENS: "256"
+      # ntfy topic - keep it secret/unguessable, it doubles as the password.
+      NTFY_TOPIC: "mcadvisoryt-mistral-9f2c7a"
+      ADMIN_EMAIL: "joshi@joshi.com"
+      ADMIN_PASSWORD: "joshi"
+      ADMIN_NAME: "Joshi"
 
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +57,6 @@ jobs:
           echo "LLAMA_SERVER=$BIN" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$(dirname "$BIN")" >> "$GITHUB_ENV"
           chmod +x "$BIN"
-          echo "installed engine: $BIN"
 
       - name: Download uncensored Mistral 7B (Q4_K_M, ~4.4 GB)
         run: |
@@ -69,9 +71,6 @@ jobs:
           )
           PY
           ls -lh models
-
-      - name: Install Python deps
-        run: pip install --quiet fastapi "uvicorn[standard]" httpx
 
       - name: Install ngrok
         run: |
@@ -89,19 +88,6 @@ jobs:
             --host 127.0.0.1 --port 8080 \
             -c 8192 -t 4 --threads-batch 4 \
             > llama.log 2>&1 &
-          echo "llama-server started"
-
-      - name: Start web-search wrapper
-        env:
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
-          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
-        run: |
-          nohup python serve.py > app.log 2>&1 &
-          echo "wrapper started"
-
-      - name: Wait for the model to load
-        run: |
           for i in $(seq 1 120); do
             if curl -sf http://127.0.0.1:8080/health >/dev/null; then
               echo "model ready"; break
@@ -109,6 +95,41 @@ jobs:
             sleep 5
           done
           echo "---- llama.log ----"; tail -n 8 llama.log || true
+
+      - name: Start Open WebUI (Docker)
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: |
+          docker pull -q ghcr.io/open-webui/open-webui:main
+          docker run -d --name open-webui \
+            -p "${APP_PORT}:8080" \
+            --add-host=host.docker.internal:host-gateway \
+            -e OPENAI_API_BASE_URL=http://host.docker.internal:8080/v1 \
+            -e OPENAI_API_KEY=none \
+            -e ENABLE_OPENAI_API=true \
+            -e ENABLE_OLLAMA_API=false \
+            -e WEBUI_ADMIN_EMAIL="${ADMIN_EMAIL}" \
+            -e WEBUI_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+            -e WEBUI_ADMIN_NAME="${ADMIN_NAME}" \
+            -e WEBUI_SECRET_KEY=ephemeral-runner-secret \
+            -e ENABLE_WEB_SEARCH=true \
+            -e WEB_SEARCH_ENGINE="${SEARCH_PROVIDER}" \
+            -e TAVILY_API_KEY="${TAVILY_API_KEY}" \
+            -e BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL=true \
+            -e ENABLE_PERSISTENT_CONFIG=false \
+            ghcr.io/open-webui/open-webui:main
+          echo "open-webui container started"
+
+      - name: Wait for Open WebUI to be ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf "http://127.0.0.1:${APP_PORT}/health" >/dev/null; then
+              echo "open-webui ready"; break
+            fi
+            sleep 5
+          done
+          docker ps --format '{{.Names}} | {{.Status}}'
+          echo "---- open-webui logs ----"; docker logs --tail 20 open-webui || true
 
       - name: Start ngrok tunnel and publish the URL
         env:
@@ -125,15 +146,27 @@ jobs:
             [ -n "$URL" ] && break
             sleep 2
           done
+          echo "URL=${URL}" >> "$GITHUB_ENV"
           {
-            echo "## Mistral web assistant is live"
+            echo "## Open WebUI is live"
             echo ""
             echo "**${URL}**"
             echo ""
-            echo "Stable ngrok URL (your account's dev domain). Open it and chat."
-            echo "Stays up until this job's ~6-hour timeout."
+            echo "Admin login: \`${ADMIN_EMAIL}\` / \`${ADMIN_PASSWORD}\`"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "URL=${URL}"
           if [ -z "$URL" ]; then echo "--- ngrok.log ---"; tail -n 30 ngrok.log || true; fi
-          # keep the tunnel (and the job) alive for the rest of the window
-          sleep 21000
+
+      - name: Notify via ntfy
+        run: |
+          MSG=$(printf 'Open WebUI is up.\nURL: %s\nLogin: %s / %s' "$URL" "$ADMIN_EMAIL" "$ADMIN_PASSWORD")
+          curl -s \
+            -H "Title: Mistral web assistant started" \
+            -H "Priority: default" \
+            -H "Tags: robot" \
+            -H "Click: ${URL}" \
+            -d "$MSG" "https://ntfy.sh/${NTFY_TOPIC}" || true
+          echo "notification sent"
+
+      - name: Keep the tunnel alive
+        run: sleep 21000
