@@ -100,7 +100,10 @@ jobs:
             -e WEBUI_ADMIN_EMAIL="${ADMIN_EMAIL}" \
             -e WEBUI_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
             -e WEBUI_ADMIN_NAME="${ADMIN_NAME}" \
+            -e WEBUI_NAME="Mistral Web Assistant" \
             -e WEBUI_SECRET_KEY=ephemeral-runner-secret \
+            -e ENABLE_SIGNUP=false \
+            -e AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST=30 \
             -e WEBUI_URL="${PUBLIC_URL}" \
             -e DEFAULT_MODELS="${DEFAULT_MODEL}" \
             -e DEFAULT_PINNED_MODELS="${DEFAULT_MODEL}" \
