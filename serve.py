@@ -22,6 +22,9 @@ from pydantic import BaseModel
 LLAMA_URL = os.environ.get("LLAMA_URL", "http://127.0.0.1:8080").rstrip("/")
 SEARCH_PROVIDER = os.environ.get("SEARCH_PROVIDER", "tavily").lower()
 TOP_K = int(os.environ.get("TOP_K", "5"))
+# Keep replies short enough to finish inside Cloudflare's ~100-125s request
+# window. At a few tokens/sec on CPU, 256 tokens is roughly a minute.
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "256"))
 
 SYSTEM_PROMPT = (
     "You are a helpful, direct assistant running locally. When web-search results "
@@ -129,7 +132,7 @@ def chat(inp: ChatIn):
             {"role": "user", "content": user},
         ],
         "temperature": 0.7,
-        "max_tokens": 1024,
+        "max_tokens": MAX_TOKENS,
         "stream": False,
     }
     r = httpx.post(f"{LLAMA_URL}/v1/chat/completions", json=payload, timeout=900)

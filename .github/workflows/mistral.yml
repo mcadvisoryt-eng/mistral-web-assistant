@@ -21,6 +21,7 @@ jobs:
       SEARCH_PROVIDER: tavily
       LLAMA_URL: http://127.0.0.1:8080
       APP_PORT: "8000"
+      MAX_TOKENS: "256"
 
     steps:
       - uses: actions/checkout@v4
