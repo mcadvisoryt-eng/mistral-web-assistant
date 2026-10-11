@@ -208,7 +208,7 @@ f.addEventListener('submit', async (e) => {
   try {
     const res = await fetch('/chat', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1'},
       body: JSON.stringify({message: text}),
     });
     const data = await res.json();

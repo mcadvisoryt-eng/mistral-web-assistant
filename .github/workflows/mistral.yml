@@ -73,12 +73,15 @@ jobs:
       - name: Install Python deps
         run: pip install --quiet fastapi "uvicorn[standard]" httpx
 
-      - name: Install cloudflared
+      - name: Install ngrok
         run: |
-          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-            -o cloudflared
-          chmod +x cloudflared
-          ./cloudflared --version
+          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
+            | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ngrok
+          ngrok version
 
       - name: Start llama-server (CPU, 4 threads)
         run: |
@@ -107,12 +110,18 @@ jobs:
           done
           echo "---- llama.log ----"; tail -n 8 llama.log || true
 
-      - name: Open tunnel and publish the URL
+      - name: Start ngrok tunnel and publish the URL
+        env:
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: |
-          ./cloudflared tunnel --url "http://127.0.0.1:${APP_PORT}" --no-autoupdate > tunnel.log 2>&1 &
+          ngrok config add-authtoken "$NGROK_AUTHTOKEN"
+          # No --url: ngrok uses this account's free static dev domain, so the
+          # public URL is the same on every run. Read it from the agent's local API.
+          ngrok http "$APP_PORT" --log stdout > ngrok.log 2>&1 &
           URL=""
           for i in $(seq 1 60); do
-            URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' tunnel.log | head -1 || true)
+            curl -s http://127.0.0.1:4040/api/tunnels -o tunnels.json || true
+            URL=$(grep -m1 -oE '"public_url":"https://[^"]+"' tunnels.json | sed -E 's/.*"(https:[^"]+)"/\1/' || true)
             [ -n "$URL" ] && break
             sleep 2
           done
@@ -121,9 +130,10 @@ jobs:
             echo ""
             echo "**${URL}**"
             echo ""
-            echo "Open that URL and chat. It stays up until this job's ~6-hour timeout."
-            echo "The URL changes every run - grab the newest one from the latest run's Summary."
+            echo "Stable ngrok URL (your account's dev domain). Open it and chat."
+            echo "Stays up until this job's ~6-hour timeout."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "URL=${URL}"
+          if [ -z "$URL" ]; then echo "--- ngrok.log ---"; tail -n 30 ngrok.log || true; fi
           # keep the tunnel (and the job) alive for the rest of the window
           sleep 21000
