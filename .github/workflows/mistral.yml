@@ -10,6 +10,11 @@ on:
         description: "Gemini model id to pre-select in Open WebUI"
         required: false
         default: "gemini-2.5-flash"
+      allow_missing_keys:
+        description: "Dry run: don't fail if secrets are missing (no model)"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: mistral-web-assistant
@@ -49,16 +54,21 @@ jobs:
           [ -z "${{ secrets.NGROK_AUTHTOKEN }}" ] && missing="$missing NGROK_AUTHTOKEN"
           [ -z "${{ secrets.TAVILY_API_KEY }}" ] && missing="$missing TAVILY_API_KEY"
           if [ -n "$missing" ]; then
-            echo "::error::Missing repository secrets:$missing"
-            echo "Add them under Settings -> Secrets and variables -> Actions."
-            exit 1
+            if [ "${{ github.event.inputs.allow_missing_keys }}" = "true" ]; then
+              echo "::warning::Missing secrets (allowed in dry-run mode):$missing"
+            else
+              echo "::error::Missing repository secrets:$missing"
+              echo "Add them under Settings -> Secrets and variables -> Actions."
+              exit 1
+            fi
           fi
-          echo "all required secrets present"
+          echo "secret check done"
 
       - name: Verify Gemini API key
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          if [ -z "${GEMINI_API_KEY}" ]; then echo "no Gemini key - skipping verification"; exit 0; fi
           code=$(curl -s -o /tmp/models.json -w "%{http_code}" \
             -H "Authorization: Bearer ${GEMINI_API_KEY}" "${GEMINI_BASE_URL}/models" || true)
           echo "Gemini /models HTTP ${code}"
