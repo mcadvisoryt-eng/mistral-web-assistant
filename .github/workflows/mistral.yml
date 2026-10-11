@@ -32,18 +32,28 @@ jobs:
           df -h /
 
       - name: Install llama.cpp (prebuilt CPU build)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgomp1
           mkdir -p llm
-          URL=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
-                | grep -oE 'https://[^"]+bin-ubuntu-x64\.zip' | head -1)
+          # The rolling b#### releases carry the binaries; "latest" is a bare
+          # version tag with none attached. Match only the plain CPU x64 build.
+          curl -s -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20" \
+            -o llm/releases.json
+          URL=$(grep -m1 -oE 'https://[^"]+/llama-[^"]*-bin-ubuntu-x64\.tar\.gz' llm/releases.json || true)
+          if [ -z "$URL" ]; then echo "no llama.cpp ubuntu-x64 asset found"; exit 1; fi
           echo "Downloading: $URL"
-          curl -L "$URL" -o llm/llama.zip
-          unzip -q -o llm/llama.zip -d llm
+          curl -L "$URL" -o llm/llama.tar.gz
+          tar -xzf llm/llama.tar.gz -C llm
           BIN=$(find llm -type f -name llama-server | head -1)
           echo "LLAMA_SERVER=$BIN" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$(dirname "$BIN")" >> "$GITHUB_ENV"
           chmod +x "$BIN"
+          echo "installed engine: $BIN"
 
       - name: Download uncensored Mistral 7B (Q4_K_M, ~4.4 GB)
         run: |
