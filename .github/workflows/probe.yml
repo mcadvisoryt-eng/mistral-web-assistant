@@ -11,10 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Resolve endpoint and print Open WebUI model ids
+      - name: Resolve endpoint and print model ids
         run: |
           set +e
-          URL=$(curl -sS -m 30 "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt +%s)" | tr -d '\r\n')
+          echo "== raw fetch =="
+          curl -sS -m 30 -o /tmp/e.txt -w "http=%{http_code} size=%{size_download}\n" \
+            "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt"
+          echo "body: [$(cat /tmp/e.txt)]"
+          URL=$(tr -d '\r\n' < /tmp/e.txt)
           echo "endpoint: $URL"
           TOKEN=$(curl -sS -m 30 -H "Content-Type: application/json" \
             -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" \
