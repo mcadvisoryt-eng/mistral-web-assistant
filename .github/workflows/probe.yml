@@ -1,0 +1,27 @@
+name: probe
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Print Open WebUI model ids
+        run: |
+          set +e
+          URL=$(curl -sS -m 30 -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/mcadvisoryt-eng/mistral-web-assistant/contents/endpoint.txt" | tr -d '\r\n')
+          echo "endpoint: $URL"
+          TOKEN=$(curl -sS -m 30 -H "Content-Type: application/json" \
+            -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+          echo "token length: ${#TOKEN}"
+          echo "== model ids containing flash =="
+          curl -sS -m 30 -H "Authorization: Bearer $TOKEN" "$URL/api/models" \
+            | python3 -c "import sys,json;d=json.load(sys.stdin);print('total:',len(d.get('data',[])));print([m.get('id') for m in d.get('data',[]) if 'flash' in m.get('id','')][:30])"
+          echo "== done =="
