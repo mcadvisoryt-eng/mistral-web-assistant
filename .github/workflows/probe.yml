@@ -11,19 +11,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: End-to-end chat completion through Open WebUI
+      - name: Gemini direct + Open WebUI chat
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set +e
+          B="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+          echo "== direct gemini, prefixed id =="
+          curl -sS -m 60 -o /tmp/g1.json -w "http=%{http_code}\n" -H "Authorization: Bearer $GEMINI_API_KEY" -H "Content-Type: application/json" \
+            -d '{"model":"models/gemini-3.8-flash","messages":[{"role":"user","content":"Say hi in three words."}],"max_tokens":30}' "$B"
+          head -c 300 /tmp/g1.json; echo
+          echo
+          echo "== direct gemini, bare id =="
+          curl -sS -m 60 -o /tmp/g2.json -w "http=%{http_code}\n" -H "Authorization: Bearer $GEMINI_API_KEY" -H "Content-Type: application/json" \
+            -d '{"model":"gemini-3.8-flash","messages":[{"role":"user","content":"Say hi in three words."}],"max_tokens":30}' "$B"
+          head -c 300 /tmp/g2.json; echo
+          echo
+          echo "== open webui /api/chat/completions body =="
           URL=$(curl -sS -m 30 "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt" | tr -d '\r\n')
-          echo "endpoint: $URL"
-          TOKEN=$(curl -sS -m 30 -H "Content-Type: application/json" \
-            -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" \
-            | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
-          echo "token length: ${#TOKEN}"
-          echo "== chat completion (models/gemini-3.8-flash) =="
-          curl -sS -m 90 -o /tmp/c.json -w "http=%{http_code}\n" \
-            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d '{"model":"models/gemini-3.8-flash","messages":[{"role":"user","content":"Say hi in three words."}],"stream":false}' \
-            "$URL/api/chat/completions"
-          head -c 800 /tmp/c.json; echo
+          TOKEN=$(curl -sS -m 30 -H "Content-Type: application/json" -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+          curl -sS -m 90 -o /tmp/c.json -w "http=%{http_code}\n" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"model":"models/gemini-3.8-flash","messages":[{"role":"user","content":"Say hi in three words."}],"stream":false}' "$URL/api/chat/completions"
+          head -c 400 /tmp/c.json; echo
           echo "== done =="
