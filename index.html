@@ -9,15 +9,15 @@
 <body>
 <p id="msg">Redirecting to the live endpoint&hellip;</p>
 <script>
-// Read the current endpoint fresh each load (no rebuild/cache lag).
-const API = "https://api.github.com/repos/mcadvisoryt-eng/mistral-web-assistant/contents/endpoint.txt";
+// Read the current endpoint fresh on every load (no rebuild or cache lag).
+const RAW = "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt";
 (async () => {
   const msg = document.getElementById("msg");
   try {
-    const r = await fetch(API, {headers: {"Accept": "application/vnd.github.raw"}, cache: "no-store"});
+    const r = await fetch(RAW + "?t=" + Date.now(), {cache: "no-store"});
     if (r.ok) {
       const url = (await r.text()).trim();
-      if (url) { location.replace(url); return; }
+      if (/^https?:\/\//.test(url)) { location.replace(url); return; }
     }
   } catch (e) {}
   msg.innerHTML = "No live endpoint right now. It comes up for ~6 hours after each run (every 5 hours) &mdash; try again shortly.";
