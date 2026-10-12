@@ -1,0 +1,51 @@
+name: probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Base URL to probe"
+        required: false
+        default: "https://detest-humongous-brigade.ngrok-free.dev"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe as a browser vs with the skip header
+        env:
+          URL: ${{ github.event.inputs.url || 'https://detest-humongous-brigade.ngrok-free.dev' }}
+        run: |
+          set +e
+          UA="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
+          SKIP="ngrok-skip-browser-warning: 1"
+
+          echo "== GET /  (browser UA, NO skip header) =="
+          curl -sS -m 30 -o /tmp/a.html -w "http=%{http_code} type=%{content_type} size=%{size_download}\n" -A "$UA" "$URL/"
+          echo "title: $(grep -oE '<title>[^<]*</title>' /tmp/a.html)"; head -c 300 /tmp/a.html; echo
+
+          echo
+          echo "== GET /  (browser UA, WITH skip header) =="
+          curl -sS -m 30 -o /tmp/b.html -w "http=%{http_code} type=%{content_type} size=%{size_download}\n" -A "$UA" -H "$SKIP" "$URL/"
+          echo "title: $(grep -oE '<title>[^<]*</title>' /tmp/b.html)"
+
+          echo
+          echo "== GET /api/config  (browser UA, NO skip header) =="
+          curl -sS -m 30 -o /tmp/c.json -w "http=%{http_code} type=%{content_type} size=%{size_download}\n" -A "$UA" -H "Accept: application/json" "$URL/api/config"
+          head -c 200 /tmp/c.json; echo
+
+          echo
+          echo "== GET /api/config  (WITH skip header) =="
+          curl -sS -m 30 -o /tmp/c2.json -w "http=%{http_code} type=%{content_type} size=%{size_download}\n" -A "$UA" -H "$SKIP" -H "Accept: application/json" "$URL/api/config"
+          head -c 200 /tmp/c2.json; echo
+
+          echo
+          echo "== headers on GET / (browser UA, no skip) =="
+          curl -sS -m 30 -o /dev/null -D - -A "$UA" "$URL/" | head -25
+
+          echo
+          echo "== done =="
