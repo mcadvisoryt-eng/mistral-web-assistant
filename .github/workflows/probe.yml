@@ -1,0 +1,31 @@
+name: probe
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check Gemini model ids and a real completion
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set +e
+          BASE="https://generativelanguage.googleapis.com/v1beta/openai"
+          echo "== flash model ids available =="
+          curl -sS -m 30 -H "Authorization: Bearer $GEMINI_API_KEY" "$BASE/models" \
+            | python3 -c "import sys,json;d=json.load(sys.stdin);print([m['id'] for m in d.get('data',[]) if 'flash' in m.get('id','')][:40])"
+          echo
+          echo "== chat completion: gemini-3.8-flash =="
+          curl -sS -m 60 -o /tmp/r1.json -w "http=%{http_code}\n" \
+            -H "Authorization: Bearer $GEMINI_API_KEY" -H "Content-Type: application/json" \
+            -d '{"model":"gemini-3.8-flash","messages":[{"role":"user","content":"Say hi in three words."}],"max_tokens":30}' \
+            "$BASE/chat/completions"
+          head -c 600 /tmp/r1.json; echo
+          echo
+          echo "== done =="
