@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -190,6 +190,40 @@ jobs:
             gh issue create --title "Current endpoint" --body "$BODY"
           fi
           echo "endpoint issue updated"
+
+      - name: Point the stable redirect page at the live endpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -s url.txt ]; then echo "no URL to publish"; exit 0; fi
+          URL=$(cat url.txt)
+          cat > redirect.html <<HTML
+          <!doctype html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <meta http-equiv="refresh" content="0; url=${URL}">
+          <title>Redirecting to the live endpoint</title>
+          <script>location.replace("${URL}");</script>
+          <style>body{font-family:system-ui;background:#0d1117;color:#e6edf3;padding:2rem}</style>
+          </head>
+          <body>
+          <p>Redirecting to the live endpoint&hellip;</p>
+          <p><a href="${URL}">${URL}</a></p>
+          </body>
+          </html>
+          HTML
+          CONTENT=$(base64 -w0 redirect.html)
+          FSHA=$(gh api "repos/${GITHUB_REPOSITORY}/contents/index.html?ref=gh-pages" --jq '.sha' 2>/dev/null || true)
+          if [ -n "$FSHA" ]; then
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/index.html" \
+              -f message="endpoint -> ${URL}" -f branch=gh-pages -f content="$CONTENT" -f sha="$FSHA" >/dev/null
+          else
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/index.html" \
+              -f message="endpoint -> ${URL}" -f branch=gh-pages -f content="$CONTENT" >/dev/null
+          fi
+          echo "stable redirect updated -> ${URL}"
 
       - name: Notify start via ntfy
         run: |
