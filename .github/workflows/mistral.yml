@@ -40,8 +40,6 @@ jobs:
       ADMIN_NAME: "Joshi"
       # Gemini's OpenAI-compatible endpoint (no trailing slash!).
       GEMINI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai"
-      # ngrok free static dev domain - stable across runs.
-      PUBLIC_URL: "https://detest-humongous-brigade.ngrok-free.dev"
       DEFAULT_MODEL: "${{ github.event.inputs.model || 'gemini-2.5-flash' }}"
 
     steps:
@@ -51,7 +49,6 @@ jobs:
         run: |
           missing=""
           [ -z "${{ secrets.GEMINI_API_KEY }}" ] && missing="$missing GEMINI_API_KEY"
-          [ -z "${{ secrets.NGROK_AUTHTOKEN }}" ] && missing="$missing NGROK_AUTHTOKEN"
           [ -z "${{ secrets.TAVILY_API_KEY }}" ] && missing="$missing TAVILY_API_KEY"
           if [ -n "$missing" ]; then
             if [ "${{ github.event.inputs.allow_missing_keys }}" = "true" ]; then
@@ -85,15 +82,12 @@ jobs:
             /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
           df -h /
 
-      - name: Install ngrok
+      - name: Install cloudflared
         run: |
-          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
-            | sudo tee /etc/apt/sources.list.d/ngrok.list
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ngrok
-          ngrok version
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o cloudflared
+          chmod +x cloudflared
+          ./cloudflared --version
 
       - name: Start Open WebUI (Docker, Gemini backend)
         env:
@@ -114,7 +108,6 @@ jobs:
             -e WEBUI_SECRET_KEY=ephemeral-runner-secret \
             -e ENABLE_SIGNUP=false \
             -e AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST=30 \
-            -e WEBUI_URL="${PUBLIC_URL}" \
             -e DEFAULT_MODELS="${DEFAULT_MODEL}" \
             -e DEFAULT_PINNED_MODELS="${DEFAULT_MODEL}" \
             -e DEFAULT_MODEL_METADATA='{"capabilities":{"web_search":true}}' \
@@ -144,48 +137,24 @@ jobs:
           docker ps --format '{{.Names}} | {{.Status}}'
           echo "---- open-webui logs ----"; docker logs --tail 20 open-webui || true
 
-      - name: Start ngrok tunnel and verify it serves the app
-        env:
-          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+      - name: Start Cloudflare tunnel and verify it serves the app
         run: |
-          ngrok config add-authtoken "$NGROK_AUTHTOKEN"
-
-          start_agent() {
-            # $1 = extra args. nohup + disown so the agent outlives this step's shell.
-            nohup ngrok http "$APP_PORT" $1 --log stdout > ngrok.log 2>&1 &
-            disown 2>/dev/null || true
-          }
-          read_url() {
-            URL=""
-            for i in $(seq 1 20); do
-              curl -s http://127.0.0.1:4040/api/tunnels -o tunnels.json || true
-              URL=$(grep -m1 -oE '"public_url":"https://[^"]+"' tunnels.json | sed -E 's/.*"(https:[^"]+)"/\1/' || true)
-              [ -n "$URL" ] && return 0
-              sleep 2
-            done
-            return 1
-          }
-
-          # Prefer binding the account's free static dev domain; fall back to
-          # ngrok's auto-assign if that binding is refused.
-          start_agent "--url $PUBLIC_URL"
-          if ! read_url; then
-            echo "binding $PUBLIC_URL failed - retrying with auto-assign"
-            tail -n 20 ngrok.log || true
-            pkill -f "ngrok http" || true
-            sleep 3
-            start_agent ""
-            read_url || true
-          fi
-          [ -n "$URL" ] || URL="$PUBLIC_URL"
+          # Cloudflare quick tunnels have no interstitial (unlike ngrok free),
+          # so the app loads directly in a browser.
+          nohup ./cloudflared tunnel --url "http://127.0.0.1:${APP_PORT}" --no-autoupdate > cf.log 2>&1 &
+          disown 2>/dev/null || true
+          URL=""
+          for i in $(seq 1 60); do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cf.log | head -1 || true)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
           printf '%s' "$URL" > url.txt
           echo "tunnel URL: $URL"
 
-          # Prove the tunnel actually serves the app end to end.
           ok=""
           for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "ngrok-skip-browser-warning: 1" "${URL}/health" || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health" || true)
             echo "tunnel check $i -> HTTP ${code}"
             [ "$code" = "200" ] && { ok=1; break; }
             sleep 3
@@ -200,8 +169,8 @@ jobs:
             echo "Tunnel verified: $([ -n "$ok" ] && echo yes || echo no)"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ -z "$ok" ]; then
-            echo "::error::ngrok tunnel is not serving ${URL}"
-            echo "--- ngrok.log ---"; tail -n 40 ngrok.log || true
+            echo "::error::Cloudflare tunnel is not serving ${URL}"
+            echo "--- cf.log ---"; tail -n 40 cf.log || true
             exit 1
           fi
 
