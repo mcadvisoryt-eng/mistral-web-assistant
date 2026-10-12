@@ -9,7 +9,7 @@ on:
       model:
         description: "Gemini model id to pre-select in Open WebUI"
         required: false
-        default: "gemini-2.5-flash"
+        default: "gemini-3.8-flash"
       allow_missing_keys:
         description: "Dry run: don't fail if secrets are missing (no model)"
         type: boolean
@@ -40,7 +40,7 @@ jobs:
       ADMIN_NAME: "Joshi"
       # Gemini's OpenAI-compatible endpoint (no trailing slash!).
       GEMINI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai"
-      DEFAULT_MODEL: "${{ github.event.inputs.model || 'gemini-2.5-flash' }}"
+      DEFAULT_MODEL: "${{ github.event.inputs.model || 'gemini-3.8-flash' }}"
 
     steps:
       - uses: actions/checkout@v4
