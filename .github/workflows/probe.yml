@@ -11,20 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Resolve endpoint and print model ids
+      - name: End-to-end chat completion through Open WebUI
         run: |
           set +e
-          echo "== raw fetch =="
-          curl -sS -m 30 -o /tmp/e.txt -w "http=%{http_code} size=%{size_download}\n" \
-            "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt"
-          echo "body: [$(cat /tmp/e.txt)]"
-          URL=$(tr -d '\r\n' < /tmp/e.txt)
+          URL=$(curl -sS -m 30 "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt" | tr -d '\r\n')
           echo "endpoint: $URL"
           TOKEN=$(curl -sS -m 30 -H "Content-Type: application/json" \
             -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" \
             | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
           echo "token length: ${#TOKEN}"
-          echo "== model ids containing flash =="
-          curl -sS -m 30 -H "Authorization: Bearer $TOKEN" "$URL/api/models" \
-            | python3 -c "import sys,json;d=json.load(sys.stdin);print('total:',len(d.get('data',[])));print([m.get('id') for m in d.get('data',[]) if 'flash' in m.get('id','')][:30])"
+          echo "== chat completion (models/gemini-3.8-flash) =="
+          curl -sS -m 90 -o /tmp/c.json -w "http=%{http_code}\n" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"model":"models/gemini-3.8-flash","messages":[{"role":"user","content":"Say hi in three words."}],"stream":false}' \
+            "$URL/api/chat/completions"
+          head -c 800 /tmp/c.json; echo
           echo "== done =="
