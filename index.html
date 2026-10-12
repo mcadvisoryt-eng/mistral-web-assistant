@@ -3,13 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="0; url=https://fellow-minnesota-anime-nova.trycloudflare.com">
-<title>Redirecting to the live endpoint</title>
-<script>location.replace("https://fellow-minnesota-anime-nova.trycloudflare.com");</script>
-<style>body{font-family:system-ui;background:#0d1117;color:#e6edf3;padding:2rem}</style>
+<title>Mistral Web Assistant</title>
+<style>body{font-family:system-ui;background:#0d1117;color:#e6edf3;padding:2rem;line-height:1.5}a{color:#58a6ff}</style>
 </head>
 <body>
-<p>Redirecting to the live endpoint&hellip;</p>
-<p><a href="https://fellow-minnesota-anime-nova.trycloudflare.com">https://fellow-minnesota-anime-nova.trycloudflare.com</a></p>
+<p id="msg">Redirecting to the live endpoint&hellip;</p>
+<script>
+// Read the current endpoint fresh each load (no rebuild/cache lag).
+const API = "https://api.github.com/repos/mcadvisoryt-eng/mistral-web-assistant/contents/endpoint.txt";
+(async () => {
+  const msg = document.getElementById("msg");
+  try {
+    const r = await fetch(API, {headers: {"Accept": "application/vnd.github.raw"}, cache: "no-store"});
+    if (r.ok) {
+      const url = (await r.text()).trim();
+      if (url) { location.replace(url); return; }
+    }
+  } catch (e) {}
+  msg.innerHTML = "No live endpoint right now. It comes up for ~6 hours after each run (every 5 hours) &mdash; try again shortly.";
+})();
+</script>
 </body>
 </html>
