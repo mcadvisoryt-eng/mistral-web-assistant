@@ -16,7 +16,10 @@ through an **ngrok** tunnel, announced over **ntfy**, and tracked in a GitHub is
 
 ## Where to find the URL
 
-Three places, any of which works:
+**Stable link (bookmark this):** https://mcadvisoryt-eng.github.io/mistral-web-assistant/
+- it always redirects to whichever endpoint is live at the time.
+
+The live endpoint itself also appears in:
 
 1. The **"Current endpoint"** issue in this repo (auto-updated each run).
 2. The run's **Summary** page.
