@@ -68,6 +68,30 @@ Open the stable link and log in with the admin account. A Gemini Flash model is
 pre-selected and web search is enabled, so you can start chatting immediately. Pick any
 other model from the model dropdown — every configured provider's models appear there.
 
+## Local (uncensored) model
+
+The job also installs **Ollama** and pulls one local model, so you get a genuinely
+self-hosted option with no provider in the loop. Default:
+`huihui_ai/deephermes3-abliterated:8b` — DeepHermes 3, abliterated (refusals removed).
+
+Change it per run with **Run workflow -> `ollama_model`**. Good alternatives:
+
+- `huihui_ai/Hermes-3-Llama-3.2-abliterated:3b` — 2GB, **much faster on CPU**
+- `huihui_ai/qwen3-abliterated:8b`
+- `dolphin3:8b` / `dolphin-mistral`
+
+Set the input to blank to skip the local model entirely. Open WebUI runs with host
+networking so it can reach Ollama on `127.0.0.1:11434`.
+
+**Honest limits:** the runner has no GPU, so this is CPU inference — a few tokens per
+second, and long answers can time out through the tunnel. It is also far weaker than the
+hosted models. It's a no-refusals option, not a Claude replacement. The job pre-warms
+the model so the first message isn't the slowest.
+
+Uncensored models are stripped of alignment and are meant to be used responsibly — the
+model cards themselves say they "require an external alignment layer for ethical use".
+What you do with the output is on you.
+
 ## Configuration
 
 Everything is set as environment variables in `.github/workflows/mistral.yml`:

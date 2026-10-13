@@ -105,6 +105,8 @@ jobs:
           if [ -z "${OLLAMA_MODEL}" ]; then echo "no local model requested - skipping"; exit 0; fi
           curl -fsSL https://ollama.com/install.sh | sh
           export OLLAMA_HOST=0.0.0.0:11434
+          # Keep the model resident in RAM (CPU inference is slow enough already).
+          export OLLAMA_KEEP_ALIVE=-1
           nohup ollama serve > ollama.log 2>&1 &
           disown 2>/dev/null || true
           for i in $(seq 1 30); do
@@ -116,6 +118,11 @@ jobs:
           if ! OLLAMA_HOST=127.0.0.1:11434 ollama list | grep -q "${OLLAMA_MODEL%%:*}"; then
             echo "::warning::local model ${OLLAMA_MODEL} did not pull; hosted models still work"
           fi
+          # Pre-warm: load the model into RAM now, so the first chat isn't slow.
+          echo "pre-warming ${OLLAMA_MODEL} ..."
+          curl -sS -m 300 http://127.0.0.1:11434/api/generate \
+            -d "{\"model\":\"${OLLAMA_MODEL}\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":1}}" >/dev/null
+          echo "pre-warm done"
           df -h / | tail -1
 
       - name: Start Open WebUI (Docker, multi-provider)
