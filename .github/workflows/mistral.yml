@@ -163,6 +163,35 @@ jobs:
           docker ps --format '{{.Names}} | {{.Status}}'
           echo "---- open-webui logs ----"; docker logs --tail 20 open-webui || true
 
+      - name: Enable web search on the default model (admin API)
+        run: |
+          set +e
+          BASE="http://127.0.0.1:${APP_PORT}"
+          TOKEN=$(curl -s -H "Content-Type: application/json" \
+            -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}" \
+            "$BASE/api/v1/auths/signin" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+          echo "admin token length: ${#TOKEN}"
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::could not sign in to configure the model; web search stays off"
+            exit 0
+          fi
+          # The DEFAULT_MODEL_METADATA env var is not applied when persistent config
+          # is disabled, so set the model's meta explicitly: web_search capability,
+          # web_search as a default feature, and native function calling.
+          PAYLOAD=$(printf '{"id":"%s","base_model_id":"%s","name":"%s","meta":{"capabilities":{"web_search":true,"citations":true,"builtin_tools":true,"status_updates":true},"defaultFeatureIds":["web_search"]},"params":{"function_calling":"native"}}' \
+            "$DEFAULT_MODEL" "$DEFAULT_MODEL" "$DEFAULT_MODEL")
+          code=$(curl -s -o /tmp/mk.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "$PAYLOAD" "$BASE/api/v1/models/create")
+          echo "model create HTTP $code"; head -c 300 /tmp/mk.json; echo
+          if [ "$code" != "200" ]; then
+            code=$(curl -s -o /tmp/up.json -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d "$PAYLOAD" "$BASE/api/v1/models/model/update?id=$DEFAULT_MODEL")
+            echo "model update HTTP $code"; head -c 300 /tmp/up.json; echo
+          fi
+
       - name: Start Cloudflare tunnel and verify it serves the app
         run: |
           # Cloudflare quick tunnels have no interstitial (unlike ngrok free),
