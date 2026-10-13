@@ -34,7 +34,9 @@ jobs:
     # GitHub-hosted jobs are hard-capped at 6h; stop just short of it.
     timeout-minutes: 350
     env:
-      APP_PORT: "8000"
+      # With host networking the container binds its own port directly, so this
+      # must match the port Open WebUI listens on (8080).
+      APP_PORT: "8080"
       # ntfy topic - keep it secret/unguessable, it doubles as the password.
       NTFY_TOPIC: "mcadvisoryt-mistral-9f2c7a"
       ADMIN_EMAIL: "joshi@joshi.com"
@@ -148,13 +150,12 @@ jobs:
           printf '%s\n' "$BASES" | tr ';' '\n'
 
           docker run -d --name open-webui \
-            -p "${APP_PORT}:8080" \
-            --add-host=host.docker.internal:host-gateway \
+            --network=host \
             -e OPENAI_API_BASE_URLS="${BASES}" \
             -e OPENAI_API_KEYS="${KEYS}" \
             -e ENABLE_OPENAI_API=true \
             -e ENABLE_OLLAMA_API=true \
-            -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+            -e OLLAMA_BASE_URL=http://127.0.0.1:11434 \
             -e WEBUI_ADMIN_EMAIL="${ADMIN_EMAIL}" \
             -e WEBUI_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
             -e WEBUI_ADMIN_NAME="${ADMIN_NAME}" \
