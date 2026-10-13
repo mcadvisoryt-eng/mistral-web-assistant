@@ -172,7 +172,7 @@ jobs:
             -e AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST=30 \
             -e DEFAULT_MODELS="${DEFAULT_MODEL}" \
             -e DEFAULT_PINNED_MODELS="${DEFAULT_MODEL}" \
-            -e DEFAULT_MODEL_METADATA='{"capabilities":{"web_search":true,"citations":true,"status_updates":true},"defaultFeatureIds":["web_search"]}' \
+            -e DEFAULT_MODEL_METADATA='{"capabilities":{"builtin_tools":false,"web_search":false,"code_interpreter":false,"image_generation":false},"defaultFeatureIds":[],"builtinTools":{"time":false,"web_search":false,"calendar":false,"image_generation":false,"memory":false,"chats":false,"code_interpreter":false,"notes":false,"tasks":false,"knowledge":false,"channels":false,"automations":false}}' \
             -e DEFAULT_MODEL_PARAMS='{"function_calling":"native"}' \
             -e ENABLE_WEB_SEARCH=true \
             -e WEB_SEARCH_ENGINE=tavily \
@@ -216,7 +216,7 @@ jobs:
           # The DEFAULT_MODEL_METADATA env var is not applied when persistent config
           # is disabled, so set the model's meta explicitly: web_search capability,
           # web_search as a default feature, and native function calling.
-          PAYLOAD=$(printf '{"id":"%s","base_model_id":"%s","name":"%s","meta":{"capabilities":{"web_search":true,"citations":true,"builtin_tools":true,"status_updates":true},"defaultFeatureIds":["web_search"]},"params":{"function_calling":"native"}}' \
+          PAYLOAD=$(printf '{"id":"%s","base_model_id":"%s","name":"%s","meta":{"capabilities":{"web_search":true,"citations":true,"builtin_tools":true,"status_updates":true},"defaultFeatureIds":["web_search"],"builtinTools":{"web_search":true,"time":false}},"params":{"function_calling":"native"}}' \
             "$DEFAULT_MODEL" "$DEFAULT_MODEL" "$DEFAULT_MODEL")
           code=$(curl -s -o /tmp/mk.json -w "%{http_code}" -X POST \
             -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
@@ -306,12 +306,13 @@ jobs:
       - name: Notify start via ntfy
         run: |
           URL=$(cat url.txt 2>/dev/null || true)
-          MSG=$(printf 'Open WebUI is up.\nURL: %s\nLogin: %s / %s' "$URL" "$ADMIN_EMAIL" "$ADMIN_PASSWORD")
+          STABLE="https://mcadvisoryt-eng.github.io/mistral-web-assistant/"
+          MSG=$(printf 'Open WebUI is up.\n\nPermanent link (always current): %s\nDirect endpoint: %s\nLogin: %s / %s' "$STABLE" "$URL" "$ADMIN_EMAIL" "$ADMIN_PASSWORD")
           curl -s \
             -H "Title: Mistral web assistant started" \
             -H "Priority: default" \
             -H "Tags: robot" \
-            -H "Click: ${URL}" \
+            -H "Click: ${STABLE}" \
             -d "$MSG" "https://ntfy.sh/${NTFY_TOPIC}" || true
           echo "start notification sent"
 
