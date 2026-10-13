@@ -10,6 +10,10 @@ on:
         description: "Gemini model id to pre-select in Open WebUI"
         required: false
         default: "models/gemini-3.6-flash"
+      ollama_model:
+        description: "Local Ollama model to pull (uncensored). Blank to skip the local model."
+        required: false
+        default: "huihui_ai/deephermes3-abliterated:8b"
       allow_missing_keys:
         description: "Dry run: don't fail if secrets are missing (no model)"
         type: boolean
@@ -41,6 +45,10 @@ jobs:
       # Gemini's OpenAI-compatible endpoint (no trailing slash!).
       GEMINI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai"
       DEFAULT_MODEL: "${{ github.event.inputs.model || 'models/gemini-3.6-flash' }}"
+      # Local, self-hosted model pulled by Ollama. Blank = skip the local model.
+      # Other options: huihui_ai/Hermes-3-Llama-3.2-abliterated:3b (2GB, much
+      # faster on CPU), huihui_ai/qwen3-abliterated:8b, dolphin3:8b, dolphin-mistral.
+      OLLAMA_MODEL: "${{ github.event.inputs.ollama_model || 'huihui_ai/deephermes3-abliterated:8b' }}"
 
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +97,25 @@ jobs:
           chmod +x cloudflared
           ./cloudflared --version
 
+      - name: Install Ollama and pull the local model
+        run: |
+          set +e
+          if [ -z "${OLLAMA_MODEL}" ]; then echo "no local model requested - skipping"; exit 0; fi
+          curl -fsSL https://ollama.com/install.sh | sh
+          export OLLAMA_HOST=0.0.0.0:11434
+          nohup ollama serve > ollama.log 2>&1 &
+          disown 2>/dev/null || true
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break
+            sleep 2
+          done
+          OLLAMA_HOST=127.0.0.1:11434 ollama pull "${OLLAMA_MODEL}"
+          OLLAMA_HOST=127.0.0.1:11434 ollama list
+          if ! OLLAMA_HOST=127.0.0.1:11434 ollama list | grep -q "${OLLAMA_MODEL%%:*}"; then
+            echo "::warning::local model ${OLLAMA_MODEL} did not pull; hosted models still work"
+          fi
+          df -h / | tail -1
+
       - name: Start Open WebUI (Docker, multi-provider)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -122,10 +149,12 @@ jobs:
 
           docker run -d --name open-webui \
             -p "${APP_PORT}:8080" \
+            --add-host=host.docker.internal:host-gateway \
             -e OPENAI_API_BASE_URLS="${BASES}" \
             -e OPENAI_API_KEYS="${KEYS}" \
             -e ENABLE_OPENAI_API=true \
-            -e ENABLE_OLLAMA_API=false \
+            -e ENABLE_OLLAMA_API=true \
+            -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
             -e WEBUI_ADMIN_EMAIL="${ADMIN_EMAIL}" \
             -e WEBUI_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
             -e WEBUI_ADMIN_NAME="${ADMIN_NAME}" \
