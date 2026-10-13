@@ -1,0 +1,48 @@
+name: probe
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Web search end-to-end
+        run: |
+          set +e
+          URL=$(curl -sS -m 30 "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt" | tr -d '\r\n')
+          echo "endpoint: $URL"
+          TOKEN=$(curl -sS -m 30 -H "Content-Type: application/json" \
+            -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+          echo "token length: ${#TOKEN}"
+
+          echo "== GET /api/v1/models/defaults =="
+          curl -sS -m 30 -w "\n[%{http_code}]\n" -H "Authorization: Bearer $TOKEN" "$URL/api/v1/models/defaults" | head -c 600
+          echo
+          echo "== GET /api/v1/retrieval/config =="
+          curl -sS -m 30 -w "\n[%{http_code}]\n" -H "Authorization: Bearer $TOKEN" "$URL/api/v1/retrieval/config" | head -c 700
+          echo
+          echo "== chat with web_search on =="
+          curl -sS -m 150 -o /tmp/c.json -w "http=%{http_code}\n" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"model":"models/gemini-3.6-flash","messages":[{"role":"user","content":"Search the web for the best anime of 2026. Give one title and a source URL."}],"stream":false,"features":{"web_search":true}}' \
+            "$URL/api/chat/completions"
+          python3 - <<'PY'
+          import json
+          try:
+              d=json.load(open('/tmp/c.json'))
+          except Exception as e:
+              print("parse fail:", e, open('/tmp/c.json').read()[:300]); raise SystemExit
+          if isinstance(d, dict) and d.get('error'):
+              print("ERROR:", str(d['error'])[:300]); raise SystemExit
+          ch=(d.get('choices') or [{}])[0]
+          print("CONTENT:", str(ch.get('message',{}).get('content',''))[:600])
+          print("SOURCES:", json.dumps(d.get('sources',[]))[:500])
+          print("TOP KEYS:", list(d.keys()))
+          PY
+          echo "== done =="
