@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Diagnose model config + search
+      - name: Web search via proper chat session
         run: |
           set +e
           URL=$(curl -sS -m 30 "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt" | tr -d '\r\n')
@@ -20,36 +20,20 @@ jobs:
             -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" \
             | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
           echo "token length: ${#TOKEN}"
-          M="models/gemini-3.5-flash-lite"
-          PAYLOAD=$(printf '{"id":"%s","base_model_id":"%s","name":"%s","meta":{"capabilities":{"web_search":true,"citations":true,"builtin_tools":true,"status_updates":true},"defaultFeatureIds":["web_search"]},"params":{"function_calling":"native"}}' "$M" "$M" "$M")
 
-          echo "== GET existing model config =="
-          curl -sS -m 30 -w "\n[%{http_code}]\n" -H "Authorization: Bearer $TOKEN" \
-            "$URL/api/v1/models/model?id=$M" | head -c 700
-          echo
-          echo "== POST create =="
-          curl -sS -m 30 -o /tmp/mk.json -w "create http=%{http_code}\n" -X POST \
+          CID=$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{}' "$URL/api/v1/chats/new" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+          echo "chat id: $CID"
+          MSGID=$(python3 -c "import uuid;print(uuid.uuid4())")
+
+          echo "== streamed completion with session_id =="
+          curl -sS -m 180 -N -o /tmp/s.txt -w "http=%{http_code}\n" \
             -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d "$PAYLOAD" "$URL/api/v1/models/create"
-          head -c 400 /tmp/mk.json; echo
-          echo "== GET config again =="
-          curl -sS -m 30 -H "Authorization: Bearer $TOKEN" \
-            "$URL/api/v1/models/model?id=$M" | python3 -c "import sys,json;d=json.load(sys.stdin);print(json.dumps(d.get('meta',{}),indent=0)[:600]);print('params:',json.dumps(d.get('params',{}))[:200])" 2>/dev/null
-          echo
-          echo "== chat (after config) =="
-          sleep 3
-          curl -sS -m 150 -o /tmp/c.json -w "http=%{http_code}\n" \
-            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d '{"model":"models/gemini-3.5-flash-lite","messages":[{"role":"user","content":"Search the web for a current India news headline and give its source URL."}],"stream":false,"features":{"web_search":true}}' \
+            -d "{\"model\":\"models/gemini-3.5-flash-lite\",\"messages\":[{\"role\":\"user\",\"content\":\"Search the web for a current India news headline and give its source URL.\"}],\"stream\":true,\"chat_id\":\"$CID\",\"id\":\"$MSGID\",\"session_id\":\"probe-$MSGID\",\"features\":{\"web_search\":true}}" \
             "$URL/api/chat/completions"
-          python3 - <<'PY'
-          import json
-          raw = open('/tmp/c.json').read()
-          try: d = json.loads(raw)
-          except Exception: print("non-json:", raw[:200]); raise SystemExit
-          if isinstance(d, list): print("list:", str(d)[:200]); raise SystemExit
-          ch = (d.get('choices') or [{}])[0]
-          print("CONTENT:", str(ch.get('message', {}).get('content',''))[:400])
-          print("SOURCES:", json.dumps(d.get('sources', []))[:400])
-          PY
+          echo "---- search evidence ----"
+          grep -aoE 'search_web|web_search|"sources"|Searching the web|"url":"[^"]{5,80}"' /tmp/s.txt | sort | uniq -c | head -20
+          echo "---- tail of stream ----"
+          tail -c 700 /tmp/s.txt
+          echo
           echo "== done =="
