@@ -1,0 +1,41 @@
+name: probe
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Local model answers?
+        run: |
+          set +e
+          URL=$(curl -sS -m 30 "https://raw.githubusercontent.com/mcadvisoryt-eng/mistral-web-assistant/gh-pages/endpoint.txt" | tr -d '\r\n')
+          echo "endpoint: $URL"
+          TOKEN=$(curl -sS -m 30 -H "Content-Type: application/json" \
+            -d '{"email":"joshi@joshi.com","password":"joshi"}' "$URL/api/v1/auths/signin" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+          echo "token length: ${#TOKEN}"
+          echo "== direct ollama generate (bypasses the tunnel) =="
+          echo "== chat via Open WebUI =="
+          S=$(date +%s)
+          curl -sS -m 280 -o /tmp/c.json -w "http=%{http_code}\n" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"model":"huihui_ai/deephermes3-abliterated:8b","messages":[{"role":"user","content":"Say hi."}],"stream":false,"max_tokens":40}' \
+            "$URL/api/chat/completions"
+          echo "elapsed: $(( $(date +%s) - S ))s"
+          python3 - <<'PY'
+          import json
+          raw = open('/tmp/c.json').read()
+          try: d = json.loads(raw)
+          except Exception: print("non-json:", raw[:200]); raise SystemExit
+          if isinstance(d, list): print("list:", str(d)[:200]); raise SystemExit
+          if d.get('error'): print("ERROR:", str(d['error'])[:200]); raise SystemExit
+          ch = (d.get('choices') or [{}])[0]
+          print("CONTENT:", str(ch.get('message', {}).get('content',''))[:300])
+          PY
+          echo "== done =="
